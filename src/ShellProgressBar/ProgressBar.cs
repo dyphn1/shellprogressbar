@@ -15,9 +15,9 @@ namespace ShellProgressBar
 
 		private readonly ConsoleColor _originalColor;
 		private readonly Func<ConsoleOutLine, int> _writeMessageToConsole;
-		private readonly int _originalWindowTop;
-		private readonly int _originalWindowHeight;
 		private readonly bool _startedRedirected;
+		private int _originalWindowTop;
+		private int _originalWindowHeight;
 		private int _originalCursorTop;
 		private int _isDisposed;
 
@@ -107,13 +107,58 @@ namespace ShellProgressBar
 			var difference = _originalWindowHeight - _originalCursorTop;
 			var write = difference <= neededPadding ? Math.Max(0, Math.Max(neededPadding, difference)) : 0;
 
-			var written = 0;
-			for (; written < write; written++)
-				Console.WriteLine();
-			if (written == 0) return;
+			// Move the cursor to the origin top,
+			// Maksure that the newline will not insert before main progressbar.
+			Console.CursorTop = _originalCursorTop;
 
-			Console.CursorTop = _originalWindowHeight - (written);
-			_originalCursorTop = Console.CursorTop - 1;
+			// All the progress bar could be seen.
+			var written = 0;
+			if (write != 0)
+			{
+				// The max window top of should be the origin cursor top.
+				// To make sure that the main progress bar could be always view on console.
+				if (Console.WindowTop < _originalCursorTop)
+				{
+					for (var i = 0; i < write; i++)
+					{
+						++written;
+
+						Console.WriteLine();
+
+						if (Console.WindowTop >= _originalCursorTop)
+							break;
+					}
+				}
+			}
+
+			// Reset the origin window top/ height, to avoid the wirtten raw will not be clean on disposed.
+			_originalWindowTop = Console.WindowTop;
+			_originalWindowHeight = Console.WindowTop + Console.WindowHeight;
+
+			// Make sure that main progress bar will be always draw on origin cursor top.
+			if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+			{
+				Console.CursorTop = _originalCursorTop;
+			}
+			else
+			{
+				// If the current cursor is on the last line of window.
+				// Scroll up 4 lines.
+				if (Console.CursorTop == (Console.WindowTop + Console.WindowHeight - 1))
+				{
+					for (var i = 0; i < 4; i++)
+					{
+						++written;
+
+						Console.WriteLine();
+					}
+				}
+				if (written != 0)
+				{
+					Console.CursorTop = _originalWindowHeight - written;
+					_originalCursorTop = Console.CursorTop - 1;
+				}
+			}
 		}
 
 		private void GrowDrawingAreaBasedOnChildren() => EnsureMainProgressBarVisible(_visibleDescendants);
@@ -392,12 +437,12 @@ namespace ShellProgressBar
 			var view = children.Where(c => !c.Collapse).Select((c, i) => new {c, i}).ToList();
 			if (!view.Any()) return;
 
-			var windowHeight = Console.WindowHeight;
+			var windowHeight = Console.WindowTop + Console.WindowHeight;
 			var lastChild = view.Max(t => t.i);
 			foreach (var tuple in view)
 			{
 				//Dont bother drawing children that would fall off the screen
-				if (cursorTop >= (windowHeight - 2))
+				if (cursorTop >= (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? windowHeight : windowHeight - 2))
 					return;
 
 				var child = tuple.c;
